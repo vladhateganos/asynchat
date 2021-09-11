@@ -1,28 +1,43 @@
 use tokio;
 use tokio::net::TcpListener;
-use tokio::io::{    AsyncWriteExt, BufReader, AsyncBufReadExt};
+use tokio::sync::broadcast;
+use tokio::io::{AsyncWriteExt, BufReader, AsyncBufReadExt};
 
 #[tokio::main]
 async fn main() {
     let listener = TcpListener::bind("localhost:8080").await.unwrap();
+    let (tx, _rx) = broadcast::channel(10);
 
-    let (mut socket, _addr) = listener.accept().await.unwrap();
-
-    let (reader, mut writer) = socket.split();
-    let mut reader = BufReader::new(reader);
-    let mut line = String::new();
     loop {
+        let tx = tx.clone();
+        let mut rx = tx.subscribe();
+        let (mut socket, addr) = listener.accept().await.unwrap();
 
-        // Readline just appends what it reads, does not overwrite.
-        let bytes_read = reader.read_line(&mut line).await.unwrap();
+        tokio::spawn(async move {
+            let (reader, mut writer) = socket.split();
+            let mut reader = BufReader::new(reader);
+            let mut line = String::new();
+            loop {
 
-        if bytes_read == 0 {
-            break;
-        }
+                tokio::select! {
+                // Readline just appends what it reads, does not overwrite.
+                    result = reader.read_line(&mut line) => {
+                        if result.unwrap() == 0 {
+                            break;
+                        }
+                        tx.send((line.clone(), addr)).unwrap();
+                        line.clear();
+                    }
 
-        writer.write_all(line.as_bytes()).await.unwrap();
-        line.clear();
+                    received = rx.recv() => {
+                        let (msg, other_addr) = received.unwrap();
+                        if addr != other_addr {
+                            writer.write_all(msg.as_bytes()).await.unwrap();
+                        }
+
+                    }
+                }
+            }
+        });
     }
-
-
 }
