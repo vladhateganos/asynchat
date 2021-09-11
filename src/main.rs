@@ -1,6 +1,6 @@
 use tokio;
 use tokio::net::TcpListener;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{    AsyncWriteExt, BufReader, AsyncBufReadExt};
 
 #[tokio::main]
 async fn main() {
@@ -8,11 +8,20 @@ async fn main() {
 
     let (mut socket, _addr) = listener.accept().await.unwrap();
 
+    let (reader, mut writer) = socket.split();
+    let mut reader = BufReader::new(reader);
+    let mut line = String::new();
     loop {
-        let mut buffer = [0u8; 1024];
-        socket.read(&mut buffer).await.unwrap();
 
-        socket.write_all(&buffer[..]).await.unwrap();
+        // Readline just appends what it reads, does not overwrite.
+        let bytes_read = reader.read_line(&mut line).await.unwrap();
+
+        if bytes_read == 0 {
+            break;
+        }
+
+        writer.write_all(line.as_bytes()).await.unwrap();
+        line.clear();
     }
 
 
